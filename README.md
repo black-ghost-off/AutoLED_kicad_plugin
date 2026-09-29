@@ -14,9 +14,9 @@ Tested with KiCad 10.0 (SWIG Python API). The generated schematic uses the KiCad
 
 All images are generated from [tests/ukraine.svg](tests/ukraine.svg).
 
-**Preview in the dialog.** WS2812B at 7 mm pitch, 150 mm wide, 1 mm border offset, zigzag with
-180° rotation on backward lines. Red = LED body, yellow dot = pin 1, blue = data chain,
-green circle = LED 1.
+**Preview in the dialog.** WS2812B at 7 mm pitch, 150 mm wide, 1 mm border offset, whole LED
+body kept inside the shape, zigzag with 180° rotation on backward lines (110 LEDs).
+Red = LED body, yellow dot = pin 1, blue = data chain, green circle = LED 1.
 
 ![Preview: WS2812B zigzag](docs/images/preview_zigzag.png)
 
@@ -24,14 +24,16 @@ green circle = LED 1.
 
 ![Preview: 0805 coverage mode](docs/images/preview_0805_coverage.png)
 
-**Generated PCB** (KiCad 3D render). 90 mm wide, 8 mm pitch, outline *Image shape + parts*,
-routed by Freerouting. Top: LEDs, caps and J1/J2. Bottom: GND plane.
+**Generated PCB** (KiCad 3D render). 90 mm wide, 8 mm pitch, 0.5 mm border, zigzag with 180°
+rotation, outline *Image shape + parts*, routed by Freerouting (0 unrouted). Top: 25 LEDs with
+caps, J1 (in) and J2 (out). Bottom: GND plane and tracks.
 
 | Top | Bottom |
 |---|---|
 | ![Board top](docs/images/board_top.png) | ![Board bottom](docs/images/board_bottom.png) |
 
-**Generated schematic.** J1 → D1 → … → D36 → J2 daisy chain with a 100 nF cap per LED; ERC passes with 0 violations:
+**Generated schematic** for the same board: a J1 → D1 → … → D25 → J2 daisy chain with a
+100 nF cap per LED. ERC reports 0 violations.
 
 ![Schematic](docs/images/schematic.png)
 
@@ -39,35 +41,35 @@ routed by Freerouting. Top: LEDs, caps and J1/J2. Bottom: GND plane.
 
 ![Cut line](docs/images/cut_line.png)
 
-**Exported map** (`leds.txt`, excerpt):
+**Exported map** for the same board (`leds.txt`, excerpt):
 
 ```text
-# grid: 6 rows x 10 cols, 36 LEDs, pitch 8.000 x 8.000 mm
+# grid: 5 rows x 10 cols, 25 LEDs, pitch 8.000 x 8.000 mm
 # order: rows, zigzag from top-left
 
 [mask]  # = LED, . = empty
-......#...
+.#...##...
 .######...
-#########.
 ##########
-....######
-....####..
+....#####.
+......#...
 ```
 
 **C header** (`leds.h`, excerpt):
 
 ```c
-#define LED_ROWS  6
+#define LED_ROWS  5
 #define LED_COLS  10
-#define LED_COUNT 36
+#define LED_COUNT 25
 #define LED_ZIGZAG 1
 
 static const int8_t led_index[LED_ROWS][LED_COLS] = {
-    { -1,  -1,  -1,  -1,  -1,  -1,   0,  -1,  -1,  -1},
-    { -1,   6,   5,   4,   3,   2,   1,  -1,  -1,  -1},
-    {  7,   8,   9,  10,  11,  12,  13,  14,  15,  -1},
-    { 25,  24,  23,  22,  21,  20,  19,  18,  17,  16},
-    ...
+    { -1,   0,  -1,  -1,  -1,   1,   2,  -1,  -1,  -1},
+    { -1,   8,   7,   6,   5,   4,   3,  -1,  -1,  -1},
+    {  9,  10,  11,  12,  13,  14,  15,  16,  17,  18},
+    { -1,  -1,  -1,  -1,  23,  22,  21,  20,  19,  -1},
+    { -1,  -1,  -1,  -1,  -1,  -1,  24,  -1,  -1,  -1},
+};
 ```
 
 ## Install
