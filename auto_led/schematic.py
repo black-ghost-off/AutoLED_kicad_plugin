@@ -185,6 +185,9 @@ class _Sheet(object):
             net = nets.get(num)
             if net:
                 self.label(net, x + px, y - py, ang)
+            elif num in nets:  # explicitly unconnected (e.g. an NC connector pin)
+                self.items.append("  (no_connect (at %s %s) (uuid %s))" % (
+                    _f(x + px), _f(y - py), _uid()))
 
 
 _PAPERS = [("A4", 297, 210), ("A3", 420, 297), ("A2", 594, 420), ("A1", 841, 594), ("A0", 1189, 841)]

@@ -217,7 +217,7 @@ def apply(board, design, cfg, board_path="", outline_fn=None, net_prefix="/"):
             net_name = comp.net_of(pad.GetNumber())
             if net_name:
                 pad.SetNet(_net(board, net_prefix + net_name, nets))
-        if back:
+        if (comp.side or cfg["side"]) == "back":
             _flip(fp)
         group.AddItem(fp)
         boxes.append(_bbox_mm(fp))

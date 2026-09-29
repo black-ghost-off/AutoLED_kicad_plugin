@@ -68,6 +68,18 @@ class GridTest(unittest.TestCase):
         self.assertLessEqual(max(corners_dist(tight, r, c) for r, c in tight.order), 40 - 1 + 1)
         self.assertGreater(max(corners_dist(loose, r, c) for r, c in loose.order), 40)
 
+    def test_fit_body_in_coverage_mode(self):
+        m = disk_mask()
+        kw = dict(width_mm=100, pitch_x=7, pitch_y=7, border_mm=0, sample_mode="coverage", coverage=50)
+        loose = grid.place(m, cfg(fit_body=False, **kw))
+        tight = grid.place(m, cfg(fit_body=True, **kw))
+        self.assertLess(tight.count, loose.count)
+        for r, c in tight.order:
+            x, y = tight.x0_mm + c * 7, tight.y0_mm + r * 7
+            for dx in (-2.5, 2.5):
+                for dy in (-2.5, 2.5):
+                    self.assertLessEqual(((x + dx - 50) ** 2 + (y + dy - 50) ** 2) ** 0.5, 40 + 1)
+
     def test_trimmed_and_symmetric(self):
         # odd size: disk centre and grid points fall on pixel centres -> exact symmetry
         lay = grid.place(disk_mask(101, 40), cfg(width_mm=101, pitch_x=10, pitch_y=10, border_mm=0,
@@ -148,6 +160,23 @@ class OrderTest(unittest.TestCase):
         nozz = cfg(sample_mode="pixel", zigzag=False, zigzag_rotate=True)
         self.assertEqual(grid.place(m, nozz).reversed, set())
 
+    def test_cap_rotation_and_offset(self):
+        m = Mask(2, 1, bytes([1, 1]))
+        base = cfg(sample_mode="pixel", pitch_x=10, pitch_y=10, rotation=0)
+        d = design.build(grid.place(m, base), base, config.preset_for(base))
+        cap = [c for c in d.components if c.kind == "cap"][0]
+        self.assertEqual(cap.rotation, 90)                        # default: 90 deg
+        self.assertAlmostEqual(cap.xy[0] - d.leds[0].xy[0], 0)
+        self.assertAlmostEqual(cap.xy[1] - d.leds[0].xy[1], 4.2)  # WS2812B preset offset
+        custom = cfg(sample_mode="pixel", pitch_x=10, pitch_y=10, rotation=90, cap_rotation=0,
+                     cap_custom_offset=True, cap_dx=3, cap_dy=-2)
+        d = design.build(grid.place(m, custom), custom, config.preset_for(custom))
+        cap = [c for c in d.components if c.kind == "cap"][0]
+        self.assertEqual(cap.rotation, 90)                        # base 90 + relative 0
+        dx, dy = cap.xy[0] - d.leds[0].xy[0], cap.xy[1] - d.leds[0].xy[1]
+        self.assertAlmostEqual(dx, -2)  # (3, -2) rotated 90 deg CCW on screen
+        self.assertAlmostEqual(dy, -3)
+
     def test_old_config_migrates(self):
         c = cfg(order="cols_serpentine")
         self.assertEqual((c["order"], c["zigzag"]), ("cols", True))
@@ -201,6 +230,51 @@ class OutputTest(unittest.TestCase):
             self.assertTrue({"WS2812B", "C", "Conn_01x03", "Conn_01x07"} <= names)
             self.assertTrue(schematic.register_library(tmp, lib))
             self.assertFalse(schematic.register_library(tmp, lib))
+
+
+class ConnectorTest(unittest.TestCase):
+    def build(self, **kw):
+        c = cfg(sample_mode="pixel", pitch_x=10, pitch_y=10, **kw)
+        return design.build(grid.place(Mask(3, 1, bytes([1, 1, 1])), c), c, config.preset_for(c))
+
+    def conns(self, d):
+        return {c.ref: c for c in d.components if c.kind == "conn"}
+
+    def test_default_pinout_and_footprint(self):
+        j = self.conns(self.build())
+        self.assertEqual([p[2] for p in j["J1"].pins], ["+5V", "DIN", "GND"])
+        self.assertEqual([p[2] for p in j["J2"].pins], ["+5V", "DOUT", "GND"])
+        self.assertTrue(j["J1"].footprint.endswith("PinHeader_1x03_P2.54mm_Vertical"))
+
+    def test_custom_pinout_template_and_nc(self):
+        d = self.build(conn_pinout="gnd, data, 5v, nc",
+                       conn_footprint="Connector_JST:JST_PH_B{n}B-PH-K_1x{n:02d}_P2.00mm_Vertical")
+        j1 = self.conns(d)["J1"]
+        self.assertEqual([p[2] for p in j1.pins], ["GND", "DIN", "+5V", None])
+        self.assertEqual(j1.footprint, "Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical")
+        with self.assertRaises(ValueError):
+            self.build(conn_pinout="+5V,GND")          # no DATA
+        with self.assertRaises(ValueError):
+            self.build(conn_pinout="+5V,DATA,FOO")
+
+    def test_enable_placement_rotation_side(self):
+        self.assertEqual(list(self.conns(self.build(conn_out=False))), ["J1"])
+        self.assertEqual(self.conns(self.build(conn_in=False))["J1"].value, "LED_OUT")
+        d = self.build(conn_placement="manual", conn_in_x=12, conn_in_y=34, conn_out_x=56,
+                       conn_out_y=78, conn_rotation=90, conn_side="opposite")
+        j = self.conns(d)
+        self.assertEqual((j["J1"].xy, j["J2"].xy), ((12, 34), (56, 78)))
+        self.assertEqual((j["J1"].rotation, j["J1"].side), (90, "back"))
+        auto = self.conns(self.build(conn_gap=10))["J1"]
+        self.assertAlmostEqual(auto.xy[0], 100 - (2.5 + 10 + 1.27))   # left of the first LED
+        self.assertAlmostEqual(auto.xy[1], 100 - 2.54)                 # 3 pins centred on it
+
+    def test_matrix_split(self):
+        c = cfg(sample_mode="pixel", preset="LED 0805", pitch_x=5, pitch_y=5, conn_max_pins=2)
+        m = Mask(5, 1, bytes([1] * 5))
+        j = self.conns(design.build(grid.place(m, c), c, config.preset_for(c)))
+        cols = [x for x in j.values() if x.value == "COLS"]
+        self.assertEqual([len(x.pins) for x in cols], [2, 2, 1])
 
 
 class OutlineTest(unittest.TestCase):

@@ -74,6 +74,10 @@ START_CORNERS = [
 
 SIDES = [("front", "Front (F.Cu)"), ("back", "Back (B.Cu)")]
 
+CONN_PLACEMENTS = [("auto", "Auto: beside first / last LED"), ("manual", "Manual X / Y")]
+
+CONN_SIDES = [("same", "Same side as LEDs"), ("opposite", "Opposite side")]
+
 OUTLINES = [
     ("none", "None"),
     ("rect", "Rectangle around parts"),
@@ -126,7 +130,25 @@ DEFAULTS = {
     "decoupling": True,
     "cap_value": "100nF",
     "cap_footprint": "Capacitor_SMD:C_0402_1005Metric",
+    "cap_rotation": 90.0,         # relative to the LED base rotation
+    "cap_custom_offset": False,   # False: use the LED preset's cap position
+    "cap_dx": 0.0,                # cap centre relative to LED centre (unrotated LED), mm
+    "cap_dy": 4.2,
     "connectors": True,
+    "conn_in": True,              # J1: power + data in
+    "conn_out": True,             # J2: power + data out (chain boards)
+    # {n} = pin count, e.g. "Connector_JST:JST_PH_B{n}B-PH-K_1x{n:02d}_P2.00mm_Vertical"
+    "conn_footprint": "Connector_PinHeader_2.54mm:PinHeader_1x{n:02d}_P2.54mm_Vertical",
+    "conn_pinout": "+5V,DATA,GND",  # pin 1..n; DATA = DIN on J1 / DOUT on J2, NC = unused
+    "conn_placement": "auto",     # auto: beside first / last LED; manual: X/Y below
+    "conn_gap": 2.54,             # auto: gap between the outermost LED and the connector, mm
+    "conn_in_x": 90.0,
+    "conn_in_y": 100.0,
+    "conn_out_x": 210.0,
+    "conn_out_y": 100.0,
+    "conn_rotation": 0.0,
+    "conn_side": "same",          # same side as the LEDs, or "opposite"
+    "conn_max_pins": 40,          # matrix mode: split row / column connectors
     # chain / numbering
     "order": "rows",
     "zigzag": True,

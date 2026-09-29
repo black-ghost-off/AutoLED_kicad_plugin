@@ -45,7 +45,26 @@ FORM = [
         ("decoupling", "Decoupling cap per LED (addressable)", "bool", {}),
         ("cap_value", "Cap value", "text", {}),
         ("cap_footprint", "Cap footprint", "text", {}),
+        ("cap_rotation", "Cap rotation (relative to LED), deg", "float", {"min": -360, "max": 360}),
+        ("cap_custom_offset", "Custom cap position", "bool", {}),
+        ("cap_dx", "Cap offset X from LED, mm", "float", {"min": -100, "max": 100}),
+        ("cap_dy", "Cap offset Y from LED, mm", "float", {"min": -100, "max": 100}),
+    ]),
+    ("Connectors", [
         ("connectors", "Add connectors", "bool", {}),
+        ("conn_in", "J1 input (matrix: rows)", "bool", {}),
+        ("conn_out", "J2 output (matrix: columns)", "bool", {}),
+        ("conn_footprint", "Footprint, {n} = pin count", "text", {}),
+        ("conn_pinout", "Pin order (+5V, GND, DATA, NC)", "text", {}),
+        ("conn_placement", "Placement", "choice", {"choices": config.CONN_PLACEMENTS}),
+        ("conn_gap", "Auto: gap to LEDs, mm", "float", {"min": -50, "max": 200}),
+        ("conn_in_x", "J1 X, mm", "float", {"min": -2000, "max": 2000}),
+        ("conn_in_y", "J1 Y, mm", "float", {"min": -2000, "max": 2000}),
+        ("conn_out_x", "J2 X, mm", "float", {"min": -2000, "max": 2000}),
+        ("conn_out_y", "J2 Y, mm", "float", {"min": -2000, "max": 2000}),
+        ("conn_rotation", "Rotation, deg", "float", {"min": -360, "max": 360}),
+        ("conn_side", "Board side", "choice", {"choices": config.CONN_SIDES}),
+        ("conn_max_pins", "Matrix: max pins per connector", "int", {"min": 1, "max": 200}),
     ]),
     ("Chain / numbering", [
         ("order", "Direction", "choice", {"choices": config.ORDERS}),
@@ -85,92 +104,261 @@ FORM = [
 ]
 
 LED_COLOR = wx.Colour(230, 40, 40)
+CAP_COLOR = wx.Colour(200, 150, 60)
+CONN_COLOR = wx.Colour(40, 40, 40)
 SHAPE_GRAY = 70
+BACKGROUND = wx.Colour(245, 245, 245)
 
 
-def render_preview(mask, layout, cfg, width, height):
-    """Bitmap of the B/W mask with LED bodies drawn on top, fit into width x height."""
-    bmp = wx.Bitmap(max(1, width), max(1, height))
+def footprint_body(lib_id, default=(1.0, 0.5)):
+    """Approximate body size (w, h) in mm from a KiCad footprint name.
+
+    C_0402_1005Metric -> 1.0 x 0.5, PinHeader_1x03_P2.54mm -> 2.54 x 7.62.
+    """
+    import re
+    m = re.search(r"(\d\d)(\d\d)Metric", lib_id)
+    if m:
+        return int(m.group(1)) / 10.0, int(m.group(2)) / 10.0
+    m = re.search(r"_1x(\d+)_P([\d.]+)mm", lib_id)
+    if m:
+        pitch = float(m.group(2))
+        return pitch, pitch * int(m.group(1))
+    return default
+
+
+def _rot(dx, dy, deg):
+    # KiCad convention: positive angles are counter-clockwise on screen (y down)
+    a = math.radians(deg)
+    return dx * math.cos(a) + dy * math.sin(a), -dx * math.sin(a) + dy * math.cos(a)
+
+
+class PreviewView(object):
+    """Zoom / pan state of the preview, in image millimetres."""
+
+    MIN_ZOOM, MAX_ZOOM = 0.2, 200.0
+
+    def __init__(self):
+        self.zoom = 1.0
+        self.center = None  # image mm; None = centre of the image
+
+    def reset(self):
+        self.zoom, self.center = 1.0, None
+
+    def transform(self, mask, mm_per_px, width, height):
+        """(display px per mm, centre x mm, centre y mm) for this view."""
+        sx, sy = mm_per_px
+        fit = min(width / (mask.width * sx), height / (mask.height * sy)) * 0.98
+        cx, cy = self.center or (mask.width * sx / 2.0, mask.height * sy / 2.0)
+        return fit * self.zoom, cx, cy
+
+    def zoom_at(self, factor, sx_screen, sy_screen, mask, mm_per_px, width, height):
+        """Zoom by factor keeping the point under (sx_screen, sy_screen) fixed."""
+        d, cx, cy = self.transform(mask, mm_per_px, width, height)
+        px_mm = cx + (sx_screen - width / 2.0) / d
+        py_mm = cy + (sy_screen - height / 2.0) / d
+        self.zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, self.zoom * factor))
+        d2, _, _ = self.transform(mask, mm_per_px, width, height)
+        self.center = (px_mm - (sx_screen - width / 2.0) / d2,
+                       py_mm - (sy_screen - height / 2.0) / d2)
+
+    def pan(self, dx_screen, dy_screen, mask, mm_per_px, width, height):
+        d, cx, cy = self.transform(mask, mm_per_px, width, height)
+        self.center = (cx - dx_screen / d, cy - dy_screen / d)
+
+
+def render_preview(mask, layout, cfg, width, height, view=None, design=None):
+    """Bitmap of the B/W mask with LEDs, caps and connectors drawn on top.
+
+    view (PreviewView) sets zoom / pan; default fits the whole image.
+    design (design.Design) adds capacitor and connector bodies.
+    """
+    width, height = max(1, width), max(1, height)
+    bmp = wx.Bitmap(width, height)
     dc = wx.MemoryDC(bmp)
-    dc.SetBackground(wx.Brush(wx.Colour(245, 245, 245)))
+    dc.SetBackground(wx.Brush(BACKGROUND))
     dc.Clear()
     if mask is None:
         dc.SelectObject(wx.NullBitmap)
         return bmp
-    g = mask.data.translate(bytes([255] + [SHAPE_GRAY] * 255))
-    rgb = bytearray(3 * len(g))
-    rgb[0::3] = g
-    rgb[1::3] = g
-    rgb[2::3] = g
-    sx_mm, sy_mm = layout.mm_per_px if layout else (1.0, 1.0)
-    aspect = (mask.width * sx_mm) / float(mask.height * sy_mm)
-    if width / float(height) > aspect:
-        dh = height
-        dw = max(1, int(height * aspect))
-    else:
-        dw = width
-        dh = max(1, int(width / aspect))
-    img = wx.Image(mask.width, mask.height, bytes(rgb)).Scale(dw, dh, wx.IMAGE_QUALITY_NORMAL)
-    ox, oy = (width - dw) // 2, (height - dh) // 2
-    dc.DrawBitmap(wx.Bitmap(img), ox, oy)
-    if layout is not None and layout.count:
-        kx, ky = dw / float(mask.width), dh / float(mask.height)
-        preset = config.preset_for(cfg)
-        bw, bh = preset["body"]
-        if 45.0 < float(cfg["rotation"]) % 180.0 < 135.0:
-            bw, bh = bh, bw
-        pw = max(2, int(bw / sx_mm * kx))
-        ph = max(2, int(bh / sy_mm * ky))
-        dc.SetPen(wx.Pen(wx.Colour(120, 0, 0)))
-        dc.SetBrush(wx.Brush(LED_COLOR))
+    view = view or PreviewView()
+    mm_px = layout.mm_per_px if layout else (1.0, 1.0)
+    sx, sy = mm_px
+    d, cx, cy = view.transform(mask, mm_px, width, height)
+
+    def to_screen(x_mm, y_mm):
+        return width / 2.0 + (x_mm - cx) * d, height / 2.0 + (y_mm - cy) * d
+
+    # visible part of the mask only, so deep zoom stays fast
+    x0_mm, y0_mm = cx - width / 2.0 / d, cy - height / 2.0 / d
+    x1_mm, y1_mm = cx + width / 2.0 / d, cy + height / 2.0 / d
+    ix0 = max(0, int(math.floor(x0_mm / sx)))
+    iy0 = max(0, int(math.floor(y0_mm / sy)))
+    ix1 = min(mask.width, int(math.ceil(x1_mm / sx)) + 1)
+    iy1 = min(mask.height, int(math.ceil(y1_mm / sy)) + 1)
+    if ix1 > ix0 and iy1 > iy0:
+        g = mask.data.translate(bytes([255] + [SHAPE_GRAY] * 255))
+        rgb = bytearray(3 * len(g))
+        rgb[0::3] = g
+        rgb[1::3] = g
+        rgb[2::3] = g
+        img = wx.Image(mask.width, mask.height, bytes(rgb))
+        sub = img.GetSubImage(wx.Rect(ix0, iy0, ix1 - ix0, iy1 - iy0))
+        sx0, sy0 = to_screen(ix0 * sx, iy0 * sy)
+        sx1, sy1 = to_screen(ix1 * sx, iy1 * sy)
+        dw, dh = max(1, int(round(sx1 - sx0))), max(1, int(round(sy1 - sy0)))
+        quality = wx.IMAGE_QUALITY_NEAREST if d * sx > 2 else wx.IMAGE_QUALITY_NORMAL
+        dc.DrawBitmap(wx.Bitmap(sub.Scale(dw, dh, quality)), int(round(sx0)), int(round(sy0)))
+
+    if layout is None or not layout.count:
+        dc.SelectObject(wx.NullBitmap)
+        return bmp
+
+    # board mm -> image mm
+    ox, oy = float(cfg["origin_x"]), float(cfg["origin_y"])
+    bx, by = layout.x0_mm - ox, layout.y0_mm - oy
+
+    def body(x_mm, y_mm, w, h, rot, anchor=(0.0, 0.0)):
+        """Screen polygon of a w x h body rotated by rot around (x_mm, y_mm).
+
+        anchor shifts the body centre relative to the footprint origin (unrotated)."""
         pts = []
-        centres = []
-        for r, c in layout.order:
-            px, py = layout.image_px(r, c)
-            x, y = ox + px * kx, oy + py * ky
-            pts.append((int(x), int(y)))
-            centres.append((x, y, grid.led_rotation(layout, cfg, r, c)))
-            dc.DrawRectangle(int(x - pw / 2.0), int(y - ph / 2.0), pw, ph)
-        if pw >= 6:
-            # pin-1 corner marker (top-left of the unrotated body) shows LED orientation
-            dc.SetPen(wx.TRANSPARENT_PEN)
-            dc.SetBrush(wx.Brush(wx.Colour(255, 230, 0)))
-            base_rot = float(cfg["rotation"])
-            for x, y, rot in centres:
-                a = math.radians(rot - base_rot)  # body already drawn with base rotation
-                dx, dy = -pw * 0.3, -ph * 0.3
-                mx = x + dx * math.cos(a) + dy * math.sin(a)
-                my = y - dx * math.sin(a) + dy * math.cos(a)
-                dc.DrawCircle(int(mx), int(my), max(1, pw // 8))
-        if len(pts) > 1 and len(pts) < 4000:
-            dc.SetPen(wx.Pen(wx.Colour(30, 110, 230), 1))
-            dc.DrawLines(pts)
-        dc.SetPen(wx.Pen(wx.Colour(0, 160, 0), 3))
-        dc.SetBrush(wx.TRANSPARENT_BRUSH)
-        dc.DrawCircle(pts[0][0], pts[0][1], max(pw, ph))
+        for ux, uy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+            rx, ry = _rot(ux + anchor[0], uy + anchor[1], rot)
+            pts.append(wx.Point(*map(int, map(round, to_screen(x_mm + rx, y_mm + ry)))))
+        return pts
+
+    def visible(pts):
+        return any(-50 <= p.x <= width + 50 and -50 <= p.y <= height + 50 for p in pts)
+
+    # capacitors and connectors (from the design)
+    if design is not None:
+        for comp in design.components:
+            if comp.kind == "led":
+                continue
+            w, h = footprint_body(comp.footprint)
+            anchor = (0.0, 0.0)
+            if comp.kind == "conn":
+                anchor = (0.0, h / 2.0 - w / 2.0)  # pin 1 at the footprint origin
+                if comp.side and comp.side != cfg["side"]:
+                    # on the other side of the board: dashed outline only
+                    dc.SetPen(wx.Pen(CONN_COLOR, 2, wx.PENSTYLE_SHORT_DASH))
+                    dc.SetBrush(wx.TRANSPARENT_BRUSH)
+                else:
+                    dc.SetPen(wx.Pen(CONN_COLOR))
+                    dc.SetBrush(wx.Brush(wx.Colour(90, 90, 90)))
+            else:
+                dc.SetPen(wx.Pen(wx.Colour(110, 70, 0)))
+                dc.SetBrush(wx.Brush(CAP_COLOR))
+            pts = body(comp.xy[0] + bx, comp.xy[1] + by, w, h, comp.rotation, anchor)
+            if visible(pts):
+                dc.DrawPolygon(pts)
+                if comp.kind == "conn" and d > 3:
+                    dc.SetTextForeground(wx.Colour(0, 0, 0))
+                    dc.DrawText(comp.ref, pts[0].x, pts[0].y - 14)
+
+    # LEDs
+    preset = config.preset_for(cfg)
+    bw, bh = preset["body"]
+    dc.SetPen(wx.Pen(wx.Colour(120, 0, 0)))
+    dc.SetBrush(wx.Brush(LED_COLOR))
+    chain = []
+    markers = []
+    for r, c in layout.order:
+        x_mm, y_mm = layout.x0_mm + c * layout.pitch_x, layout.y0_mm + r * layout.pitch_y
+        rot = grid.led_rotation(layout, cfg, r, c)
+        pts = body(x_mm, y_mm, bw, bh, rot)
+        chain.append(wx.Point(*map(int, to_screen(x_mm, y_mm))))
+        if visible(pts):
+            dc.DrawPolygon(pts)
+            mx, my = _rot(-bw * 0.3, -bh * 0.3, rot)  # pin-1 corner of the body
+            markers.append(to_screen(x_mm + mx, y_mm + my))
+    if bw * d >= 6:
+        dc.SetPen(wx.TRANSPARENT_PEN)
+        dc.SetBrush(wx.Brush(wx.Colour(255, 230, 0)))
+        rad = max(1, int(bw * d / 8))
+        for mx, my in markers:
+            dc.DrawCircle(int(mx), int(my), rad)
+    if 1 < len(chain) < 6000:
+        dc.SetPen(wx.Pen(wx.Colour(30, 110, 230), 1))
+        dc.DrawLines(chain)
+    dc.SetPen(wx.Pen(wx.Colour(0, 160, 0), 3))
+    dc.SetBrush(wx.TRANSPARENT_BRUSH)
+    dc.DrawCircle(chain[0].x, chain[0].y, max(6, int(max(bw, bh) * d)))
     dc.SelectObject(wx.NullBitmap)
     return bmp
 
 
 class PreviewPanel(wx.Panel):
+    """Preview with mouse-wheel zoom, drag to pan, double-click to fit."""
+
     def __init__(self, parent):
-        wx.Panel.__init__(self, parent, style=wx.BORDER_SUNKEN)
+        wx.Panel.__init__(self, parent, style=wx.BORDER_SUNKEN | wx.WANTS_CHARS)
         self.SetMinSize((520, 420))
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.mask = None
         self.layout = None
         self.cfg = None
+        self.design = None
+        self.view = PreviewView()
+        self._drag = None
         self.Bind(wx.EVT_PAINT, self._on_paint)
         self.Bind(wx.EVT_SIZE, lambda e: (self.Refresh(), e.Skip()))
+        self.Bind(wx.EVT_MOUSEWHEEL, self._on_wheel)
+        self.Bind(wx.EVT_LEFT_DOWN, self._on_down)
+        self.Bind(wx.EVT_LEFT_UP, self._on_up)
+        self.Bind(wx.EVT_MOTION, self._on_motion)
+        self.Bind(wx.EVT_LEFT_DCLICK, lambda e: self.fit())
+        self.Bind(wx.EVT_MOUSE_CAPTURE_LOST, lambda e: setattr(self, "_drag", None))
 
-    def set_data(self, mask, layout, cfg):
-        self.mask, self.layout, self.cfg = mask, layout, cfg
+    def set_data(self, mask, layout, cfg, design=None):
+        self.mask, self.layout, self.cfg, self.design = mask, layout, cfg, design
+        self.Refresh()
+
+    def _mm_per_px(self):
+        return self.layout.mm_per_px if self.layout else (1.0, 1.0)
+
+    def zoom(self, factor, at=None):
+        if self.mask is None:
+            return
+        w, h = self.GetClientSize()
+        x, y = at if at is not None else (w / 2.0, h / 2.0)
+        self.view.zoom_at(factor, x, y, self.mask, self._mm_per_px(), w, h)
+        self.Refresh()
+
+    def fit(self):
+        self.view.reset()
+        self.Refresh()
+
+    def _on_wheel(self, evt):
+        factor = 1.25 if evt.GetWheelRotation() > 0 else 1 / 1.25
+        self.zoom(factor, evt.GetPosition())
+
+    def _on_down(self, evt):
+        self._drag = evt.GetPosition()
+        if not self.HasCapture():
+            self.CaptureMouse()
+        self.SetCursor(wx.Cursor(wx.CURSOR_SIZING))
+
+    def _on_up(self, _evt):
+        self._drag = None
+        if self.HasCapture():
+            self.ReleaseMouse()
+        self.SetCursor(wx.NullCursor)
+
+    def _on_motion(self, evt):
+        if self._drag is None or not evt.Dragging() or self.mask is None:
+            return
+        pos = evt.GetPosition()
+        w, h = self.GetClientSize()
+        self.view.pan(pos.x - self._drag.x, pos.y - self._drag.y, self.mask, self._mm_per_px(), w, h)
+        self._drag = pos
         self.Refresh()
 
     def _on_paint(self, _evt):
         dc = wx.AutoBufferedPaintDC(self)
         w, h = self.GetClientSize()
-        dc.DrawBitmap(render_preview(self.mask, self.layout, self.cfg, w, h), 0, 0)
+        dc.DrawBitmap(render_preview(self.mask, self.layout, self.cfg, w, h, self.view,
+                                     self.design), 0, 0)
 
 
 class AutoLedDialog(wx.Dialog):
@@ -220,6 +408,16 @@ class AutoLedDialog(wx.Dialog):
 
         right = wx.BoxSizer(wx.VERTICAL)
         self.preview = PreviewPanel(self)
+        tools = wx.BoxSizer(wx.HORIZONTAL)
+        for label, handler in (("Zoom +", lambda e: self.preview.zoom(1.5)),
+                               ("Zoom \u2212", lambda e: self.preview.zoom(1 / 1.5)),
+                               ("Fit", lambda e: self.preview.fit())):
+            b = wx.Button(self, label=label, style=wx.BU_EXACTFIT)
+            b.Bind(wx.EVT_BUTTON, handler)
+            tools.Add(b, 0, wx.RIGHT, 4)
+        tools.Add(wx.StaticText(self, label="wheel = zoom, drag = move, double-click = fit"),
+                  0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 8)
+        right.Add(tools, 0, wx.LEFT | wx.TOP, 4)
         right.Add(self.preview, 1, wx.EXPAND | wx.ALL, 4)
         self.status = wx.StaticText(self, label="Choose an image")
         right.Add(self.status, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 6)
@@ -319,7 +517,25 @@ class AutoLedDialog(wx.Dialog):
         self.controls["scale_mode"][0].Enable(not pixel)
         self.controls["coverage"][0].Enable(cfg["sample_mode"] == "coverage")
         self.controls["border_mm"][0].Enable(not pixel)
-        self.controls["fit_body"][0].Enable(cfg["sample_mode"] == "center")
+        self.controls["fit_body"][0].Enable(cfg["sample_mode"] in ("center", "coverage"))
+        caps = cfg["decoupling"] and config.preset_for(cfg)["kind"] == "addressable"
+        for key in ("cap_value", "cap_footprint", "cap_rotation", "cap_custom_offset"):
+            self.controls[key][0].Enable(caps)
+        for key in ("cap_dx", "cap_dy"):
+            self.controls[key][0].Enable(caps and cfg["cap_custom_offset"])
+        conn = cfg["connectors"]
+        manual = cfg["conn_placement"] == "manual"
+        matrix = config.preset_for(cfg)["kind"] != "addressable"
+        for key in ("conn_in", "conn_out", "conn_footprint", "conn_placement", "conn_rotation",
+                    "conn_side"):
+            self.controls[key][0].Enable(conn)
+        self.controls["conn_pinout"][0].Enable(conn and not matrix)
+        self.controls["conn_max_pins"][0].Enable(conn and matrix)
+        self.controls["conn_gap"][0].Enable(conn and not manual)
+        for key in ("conn_in_x", "conn_in_y"):
+            self.controls[key][0].Enable(conn and manual and cfg["conn_in"])
+        for key in ("conn_out_x", "conn_out_y"):
+            self.controls[key][0].Enable(conn and manual and cfg["conn_out"])
 
     def update_preview(self):
         cfg = self.read_values()
@@ -335,7 +551,11 @@ class AutoLedDialog(wx.Dialog):
             self.preview.set_data(None, None, cfg)
             self.status.SetLabel("Error: %s" % e)
             return
-        self.preview.set_data(mask, layout, cfg)
+        design = None
+        if layout.count and layout.count <= 20000:
+            from . import design as design_mod
+            design = design_mod.build(layout, cfg, config.preset_for(cfg))
+        self.preview.set_data(mask, layout, cfg, design)
         sx, sy = layout.mm_per_px
         shape = "image %.1f x %.1f mm" % (mask.width * sx, mask.height * sy)
         if layout.count:

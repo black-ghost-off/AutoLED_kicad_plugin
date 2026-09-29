@@ -115,7 +115,7 @@ def place(mask, cfg):
     # "keep whole LED body inside": the body rectangle grown by the border offset
     # must lie inside the shape (border is then measured from the body edge)
     body_hw = body_hh = 0.0
-    if cfg.get("fit_body") and mode == "center":
+    if cfg.get("fit_body") and mode in ("center", "coverage"):
         from .config import preset_for
         bw, bh = preset_for(cfg)["body"]
         if 45.0 < float(cfg["rotation"]) % 180.0 < 135.0:
@@ -132,8 +132,11 @@ def place(mask, cfg):
     def ok(xm, ym):
         fx, fy = xm / s, ym / s
         ix, iy = int(math.floor(fx)), int(math.floor(fy))
-        if body_hw > 0 and body_hh > 0:
-            return bool(mask.at(ix, iy)) and body_inside(fx, fy)
+        fits = body_hw > 0 and body_hh > 0
+        if fits and not (mask.at(ix, iy) and body_inside(fx, fy)):
+            return False
+        if fits and mode == "center":
+            return True
         if mode == "coverage":
             x0, x1 = int(round(fx - hw)), int(round(fx + hw))
             y0, y1 = int(round(fy - hh)), int(round(fy + hh))

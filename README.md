@@ -16,9 +16,16 @@ All images are generated from [tests/ukraine.svg](tests/ukraine.svg).
 
 **Preview in the dialog.** WS2812B at 7 mm pitch, 150 mm wide, 1 mm border offset, whole LED
 body kept inside the shape, zigzag with 180° rotation on backward lines (110 LEDs).
-Red = LED body, yellow dot = pin 1, blue = data chain, green circle = LED 1.
+Red = LED body, yellow dot = pin 1, orange = decoupling cap, grey = connectors J1/J2,
+blue = data chain, green circle = LED 1.
 
 ![Preview: WS2812B zigzag](docs/images/preview_zigzag.png)
+
+The preview zooms with the mouse wheel (around the cursor) and pans by dragging.
+Double-click or **Fit** shows everything again. Zoomed in, you can check the cap and LED
+spacing before generating:
+
+![Preview zoomed in](docs/images/preview_zoom.png)
 
 **Same shape, 0805 LEDs** at 4 mm pitch in *cell coverage ≥ 60 %* mode, rows without zigzag:
 
@@ -145,6 +152,19 @@ if (i != LED_NONE) leds[i] = CRGB::Red;
 ## Circuits
 
 - **Addressable** (WS2812B, WS2812B-2020, SK6812MINI): `J1 (+5V, DIN, GND) → D1 → D2 → … → DN → J2 (+5V, DOUT, GND)`.
+  Each cap's position comes from the LED preset, or from *Custom cap position* (X/Y offset from
+  the LED centre, before LED rotation). *Cap rotation* is relative to the LED rotation (default
+  90°). Caps don't follow the zigzag 180° flip.
+- **Connectors** (*Connectors* section). Each setting:
+
+  | Setting | Meaning |
+  |---|---|
+  | *J1 input* / *J2 output* | Enable each connector. In matrix mode, J1 = rows and J2 = columns. |
+  | *Footprint* | Template where `{n}` is the pin count, e.g. `Connector_JST:JST_PH_B{n}B-PH-K_1x{n:02d}_P2.00mm_Vertical` |
+  | *Pin order* | Pins 1…n, e.g. `+5V,DATA,GND` or `GND,DATA,+5V,NC`. `DATA` is DIN on J1 and DOUT on J2, `NC` = no-connect. |
+  | *Placement* | *Auto*: beside the first / last LED with *gap to LEDs*. *Manual*: J1 / J2 X/Y in board mm. |
+  | *Rotation*, *Board side* | Side is the same as the LEDs or the opposite side. The preview shows opposite-side connectors dashed. |
+  | *Matrix: max pins per connector* | Splits long row / column connectors. |
   J2 lets you chain boards. Optionally each LED gets a 100 nF decoupling cap. Pin numbers match
   KiCad's standard footprints for each part.
 - **Simple LEDs** (0805/0603/1206): a row/column matrix. The anode goes to `ROW<r>` and the cathode
