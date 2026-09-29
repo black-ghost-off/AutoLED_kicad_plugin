@@ -10,6 +10,66 @@ A KiCad PCB Editor action plugin that fills a shape from an **SVG, PNG, BMP or J
 
 Tested with KiCad 10.0 (SWIG Python API). The generated schematic uses the KiCad 7 file format, so it also opens in KiCad 7, 8 and 9.
 
+## Examples
+
+All images are generated from [tests/ukraine.svg](tests/ukraine.svg).
+
+**Preview in the dialog.** WS2812B at 7 mm pitch, 150 mm wide, 1 mm border offset, zigzag with
+180° rotation on backward lines. Red = LED body, yellow dot = pin 1, blue = data chain,
+green circle = LED 1.
+
+![Preview: WS2812B zigzag](docs/images/preview_zigzag.png)
+
+**Same shape, 0805 LEDs** at 4 mm pitch in *cell coverage ≥ 60 %* mode, rows without zigzag:
+
+![Preview: 0805 coverage mode](docs/images/preview_0805_coverage.png)
+
+**Generated PCB** (KiCad 3D render). 90 mm wide, 8 mm pitch, outline *Image shape + parts*,
+routed by Freerouting. Top: LEDs, caps and J1/J2. Bottom: GND plane.
+
+| Top | Bottom |
+|---|---|
+| ![Board top](docs/images/board_top.png) | ![Board bottom](docs/images/board_bottom.png) |
+
+**Generated schematic.** J1 → D1 → … → D36 → J2 daisy chain with a 100 nF cap per LED; ERC passes with 0 violations:
+
+![Schematic](docs/images/schematic.png)
+
+**Cut line** (*Image shape only*, exported as SVG + DXF):
+
+![Cut line](docs/images/cut_line.png)
+
+**Exported map** (`leds.txt`, excerpt):
+
+```text
+# grid: 6 rows x 10 cols, 36 LEDs, pitch 8.000 x 8.000 mm
+# order: rows, zigzag from top-left
+
+[mask]  # = LED, . = empty
+......#...
+.######...
+#########.
+##########
+....######
+....####..
+```
+
+**C header** (`leds.h`, excerpt):
+
+```c
+#define LED_ROWS  6
+#define LED_COLS  10
+#define LED_COUNT 36
+#define LED_ZIGZAG 1
+
+static const int8_t led_index[LED_ROWS][LED_COLS] = {
+    { -1,  -1,  -1,  -1,  -1,  -1,   0,  -1,  -1,  -1},
+    { -1,   6,   5,   4,   3,   2,   1,  -1,  -1,  -1},
+    {  7,   8,   9,  10,  11,  12,  13,  14,  15,  -1},
+    { 25,  24,  23,  22,  21,  20,  19,  18,  17,  16},
+    ...
+```
+
 ## Install
 
 **Plugin and Content Manager (recommended):**
@@ -41,16 +101,20 @@ Then in the PCB Editor, choose **Tools → External Plugins → Refresh Plugins*
    - **Image scale by** sets the physical size of the image: *Width in mm*, *Height in mm*,
      *Percent of native size* (SVG units / image pixels at 96 per inch), or *Image DPI*.
      The status line shows the resulting size in mm.
-   - **LED centre inside shape**: a grid with pitch X/Y is centred on the shape, and an LED is placed wherever its centre is at least
-     *Border offset* mm inside the edge. A negative offset lets LEDs sit up to that far outside the edge.
+   - **LED centre inside shape**: a grid with pitch X/Y is centred on the shape. With *Keep whole
+     LED body inside* (the default), an LED is placed only where its whole body (rotated) fits in
+     the shape, at least *Border offset* mm from the edge. With that option off, only the LED
+     **centre** must be *Border offset* mm inside, so the bodies can overhang the edge. A negative
+     offset lets LEDs reach that far past the edge.
    - **Cell coverage %**: an LED is placed when at least that fraction of its grid cell is inside the shape.
    - **Pixel**: each black image pixel becomes one LED (useful for pixel art or BMP). The image scale is ignored.
    - *Grid shift X/Y* moves the grid relative to the shape. Empty outer rows and columns are trimmed.
 3. **Numbering / chain order.** *Direction* (rows or columns), *Zigzag* (serpentine: every other
    line runs backwards) and *Start corner* set the index of each LED. That index is the order of
    the WS2812 data chain, and the order of the references D1…DN.
-   *Rotate LEDs 180° on backward zigzag lines* flips every LED (and its cap) on the lines
-   that run backwards, so DIN→DOUT always points along the chain. This gives shorter,
+   *Rotate LEDs 180° on backward zigzag lines* flips every LED on the lines that run
+   backwards, so DIN→DOUT always points along the chain. Decoupling caps stay on the same
+   side of every LED, so flipped rows can't collide with the neighbouring row's caps. This gives shorter,
    straighter data traces. The preview shows each LED's orientation with a yellow pin-1 dot,
    and JSON/TXT include `rot_deg` for each LED.
 
@@ -139,4 +203,21 @@ python3 -m auto_led.cli --list      # all settings and presets
 
 ```sh
 python3 -m unittest discover tests
+```
+
+## CI / releases
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
+
+- **Every push and PR:** compile check and unit tests on Python 3.9 (KiCad's bundled
+  version) and 3.12. Then it builds the package, validates `metadata.json` against KiCad's PCM
+  schema, and uploads `AutoLED-<version>.zip` plus a `.sha256` file as a workflow artifact.
+- **Tag `v*`** (for example `git tag v1.1.0 && git push origin v1.1.0`): builds the package with the
+  version taken from the tag and publishes it as a GitHub Release with auto-generated notes.
+
+Locally:
+
+```sh
+python3 tools/build_pcm.py --version 1.1.0       # dist/AutoLED-1.1.0.zip + .sha256
+pip install jsonschema && python3 tools/validate_pcm.py dist/AutoLED-1.1.0.zip
 ```

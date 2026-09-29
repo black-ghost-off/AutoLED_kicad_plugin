@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the Python bundled with KiCad on macOS / Windows
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile check
+        run: python -m compileall -q auto_led tools tests
+      - name: Unit tests
+        run: python -m unittest discover -v tests
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      zip: ${{ steps.build.outputs.zip }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema
+      - name: Build package
+        id: build
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            python tools/build_pcm.py --version "${GITHUB_REF_NAME}"
+          else
+            python tools/build_pcm.py
+          fi
+      - name: Validate metadata against KiCad PCM schema
+        run: python tools/validate_pcm.py "${{ steps.build.outputs.zip }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoLED-pcm-package
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: AutoLED-pcm-package
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true
+          body: |
+            Install: KiCad → **Plugin and Content Manager → Install from File…** → pick `AutoLED-*.zip`.

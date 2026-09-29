@@ -31,6 +31,7 @@ FORM = [
         ("pitch_x", "LED pitch X, mm", "float", {"min": 0.5, "max": 500}),
         ("pitch_y", "LED pitch Y, mm", "float", {"min": 0.5, "max": 500}),
         ("border_mm", "Border offset, mm", "float", {"min": -200, "max": 200}),
+        ("fit_body", "Keep whole LED body inside (offset from body edge)", "bool", {}),
         ("coverage", "Min cell coverage, %", "int", {"min": 1, "max": 100}),
         ("grid_dx", "Grid shift X, mm", "float", {"min": -500, "max": 500}),
         ("grid_dy", "Grid shift Y, mm", "float", {"min": -500, "max": 500}),
@@ -318,6 +319,7 @@ class AutoLedDialog(wx.Dialog):
         self.controls["scale_mode"][0].Enable(not pixel)
         self.controls["coverage"][0].Enable(cfg["sample_mode"] == "coverage")
         self.controls["border_mm"][0].Enable(not pixel)
+        self.controls["fit_body"][0].Enable(cfg["sample_mode"] == "center")
 
     def update_preview(self):
         cfg = self.read_values()

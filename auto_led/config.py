@@ -113,6 +113,7 @@ DEFAULTS = {
     "pitch_x": 10.0,
     "pitch_y": 10.0,
     "border_mm": 1.0,
+    "fit_body": True,
     "coverage": 50,
     "grid_dx": 0.0,
     "grid_dy": 0.0,

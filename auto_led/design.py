@@ -85,13 +85,15 @@ def build(layout, cfg, preset):
                                           layout.board_xy(r, c, origin),
                                           grid.led_rotation(layout, cfg, r, c)))
         if cfg["decoupling"]:
+            # Caps use only the base rotation, not the zigzag 180 deg flip: a flipped
+            # cap would land in the gap of the neighbouring row and short into its cap.
+            base_rot = float(cfg["rotation"])
+            cdx, cdy = _rotate(preset["cap_offset"][0], preset["cap_offset"][1], base_rot)
             for i, led in enumerate(d.leds):
-                # the cap follows its LED, including the zigzag 180 deg flip
-                cdx, cdy = _rotate(preset["cap_offset"][0], preset["cap_offset"][1], led.rotation)
                 d.components.append(Component(
                     "C%d" % (i + 1), "cap", cfg["cap_value"], cfg["cap_footprint"],
                     [("1", "1", "+5V"), ("2", "2", "GND")],
-                    (led.xy[0] + cdx, led.xy[1] + cdy), (led.rotation + 90.0) % 360.0))
+                    (led.xy[0] + cdx, led.xy[1] + cdy), (base_rot + 90.0) % 360.0))
         if cfg["connectors"]:
             def beside(led):
                 # next to the outer end of the LED's row, on the nearer side

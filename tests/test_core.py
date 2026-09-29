@@ -54,9 +54,24 @@ class GridTest(unittest.TestCase):
             x, y = inset.x0_mm + c * 10, inset.y0_mm + r * 10
             self.assertLessEqual(((x - 50) ** 2 + (y - 50) ** 2) ** 0.5, 40 - 8 + 1)
 
+    def test_fit_body_keeps_leds_inside(self):
+        m = disk_mask()  # r = 40 mm; WS2812B body 5 x 5 mm
+        loose = grid.place(m, cfg(width_mm=100, pitch_x=7, pitch_y=7, border_mm=1, fit_body=False))
+        tight = grid.place(m, cfg(width_mm=100, pitch_x=7, pitch_y=7, border_mm=1, fit_body=True))
+        self.assertLess(tight.count, loose.count)
+
+        def corners_dist(lay, r, c):
+            x, y = lay.x0_mm + c * 7, lay.y0_mm + r * 7
+            return max(((x + dx - 50) ** 2 + (y + dy - 50) ** 2) ** 0.5
+                       for dx in (-2.5, 2.5) for dy in (-2.5, 2.5))
+        # every body corner is >= 1 mm inside the disk edge (1 px tolerance)
+        self.assertLessEqual(max(corners_dist(tight, r, c) for r, c in tight.order), 40 - 1 + 1)
+        self.assertGreater(max(corners_dist(loose, r, c) for r, c in loose.order), 40)
+
     def test_trimmed_and_symmetric(self):
         # odd size: disk centre and grid points fall on pixel centres -> exact symmetry
-        lay = grid.place(disk_mask(101, 40), cfg(width_mm=101, pitch_x=10, pitch_y=10, border_mm=0))
+        lay = grid.place(disk_mask(101, 40), cfg(width_mm=101, pitch_x=10, pitch_y=10, border_mm=0,
+                                                 fit_body=False))
         self.assertTrue(any(lay.cells[0]) and any(lay.cells[-1]))
         self.assertTrue(any(r[0] for r in lay.cells) and any(r[-1] for r in lay.cells))
         self.assertEqual(lay.cells, lay.cells[::-1])
@@ -119,13 +134,15 @@ class OrderTest(unittest.TestCase):
         d = design.build(lay, on, config.preset_for(on))
         rots = {c.ref: c.rotation for c in d.components}
         self.assertEqual((rots["D1"], rots["D4"], rots["D7"]), (90, 270, 90))
-        self.assertEqual((rots["C1"], rots["C4"]), (180, 0))  # caps follow their LED
-        # cap sits on the other side of a flipped LED
+        # caps are not flipped: same rotation and same side for every LED, so a
+        # flipped row's caps cannot collide with the neighbouring row's caps
+        self.assertEqual((rots["C1"], rots["C4"]), (180, 180))
         caps = {c.ref: c.xy for c in d.components if c.kind == "cap"}
         leds = {c.ref: c.xy for c in d.leds}
-        dx1 = caps["C1"][0] - leds["D1"][0]
-        dx4 = caps["C4"][0] - leds["D4"][0]
-        self.assertAlmostEqual(dx1, -dx4)
+        off1 = (caps["C1"][0] - leds["D1"][0], caps["C1"][1] - leds["D1"][1])
+        off4 = (caps["C4"][0] - leds["D4"][0], caps["C4"][1] - leds["D4"][1])
+        self.assertAlmostEqual(off1[0], off4[0])
+        self.assertAlmostEqual(off1[1], off4[1])
         off = cfg(sample_mode="pixel", zigzag=True, zigzag_rotate=False, rotation=90)
         self.assertEqual(grid.led_rotation(grid.place(m, off), off, 1, 0), 90)
         nozz = cfg(sample_mode="pixel", zigzag=False, zigzag_rotate=True)
