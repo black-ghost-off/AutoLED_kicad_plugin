@@ -1,6 +1,7 @@
 """Netlist-level description of the LED array, shared by schematic and PCB output."""
 
 import math
+import re
 import uuid
 
 from . import grid
@@ -28,9 +29,11 @@ class Component(object):
 
 
 class Design(object):
-    def __init__(self, preset):
+    def __init__(self, preset, side="front"):
         self.preset = preset
+        self.side = side              # board side of the LEDs
         self.components = []
+        self.overlaps = []
 
     @property
     def leds(self):
@@ -49,6 +52,81 @@ def _rotate(dx, dy, deg):
     # KiCad: positive angles are counter-clockwise on screen (y points down)
     a = math.radians(deg)
     return dx * math.cos(a) + dy * math.sin(a), -dx * math.sin(a) + dy * math.cos(a)
+
+
+def footprint_body(lib_id, default=(1.0, 0.5)):
+    """Approximate body size (w, h) in mm from a KiCad footprint name.
+
+    C_0402_1005Metric -> 1.0 x 0.5, PinHeader_1x03_P2.54mm -> 2.54 x 7.62.
+    """
+    m = re.search(r"(\d\d)(\d\d)Metric", lib_id)
+    if m:
+        return int(m.group(1)) / 10.0, int(m.group(2)) / 10.0
+    m = re.search(r"_1x(\d+)_P([\d.]+)mm", lib_id)
+    if m:
+        pitch = float(m.group(2))
+        return pitch, pitch * int(m.group(1))
+    return default
+
+
+def component_box(comp, preset):
+    """Axis-aligned approximate courtyard (x0, y0, x1, y1) of a component in board mm.
+
+    LEDs use the preset body + 0.3 mm, chip caps body + pads (~0.45 / 0.25 mm), connectors
+    the pin row (pin 1 at the footprint origin) + ~0.55 mm (PinHeader courtyard: 3.62 mm wide)."""
+    if comp.kind == "led":
+        w, h = preset["body"]
+        w, h, anchor = w + 0.6, h + 0.6, (0.0, 0.0)
+    elif comp.kind == "cap":
+        w, h = footprint_body(comp.footprint)
+        w, h, anchor = w + 0.9, h + 0.5, (0.0, 0.0)
+    else:
+        w, h = footprint_body(comp.footprint, (2.54, 2.54 * max(1, len(comp.pins))))
+        anchor = (0.0, h / 2.0 - w / 2.0)
+        w, h = w + 1.1, h + 1.1
+    xs, ys = [], []
+    for ux, uy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+        rx, ry = _rotate(ux + anchor[0], uy + anchor[1], comp.rotation)
+        xs.append(comp.xy[0] + rx)
+        ys.append(comp.xy[1] + ry)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_hit(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def find_overlaps(components, preset, led_side="front", cell=10.0):
+    """[(comp_a, comp_b)] whose approximate courtyards overlap on the same board side.
+
+    Components with side None are on led_side."""
+    boxes = [(c, component_box(c, preset)) for c in components]
+    buckets = {}
+    for i, (_, b) in enumerate(boxes):
+        for gx in range(int(b[0] // cell), int(b[2] // cell) + 1):
+            for gy in range(int(b[1] // cell), int(b[3] // cell) + 1):
+                buckets.setdefault((gx, gy), []).append(i)
+    pairs = set()
+    for idx in buckets.values():
+        for n, i in enumerate(idx):
+            for j in idx[n + 1:]:
+                ci, bi = boxes[i]
+                cj, bj = boxes[j]
+                same_side = (ci.side or led_side) == (cj.side or led_side)
+                if same_side and _boxes_hit(bi, bj):
+                    pairs.add((min(i, j), max(i, j)))
+    return [(boxes[i][0], boxes[j][0]) for i, j in sorted(pairs)]
+
+
+def _free_spot(candidate, others, preset, tries):
+    """First position from tries (list of (x, y)) where candidate hits nothing in others."""
+    obstacles = [component_box(o, preset) for o in others]
+    for xy in tries:
+        candidate.xy = xy
+        box = component_box(candidate, preset)
+        if not any(_boxes_hit(box, o) for o in obstacles):
+            return True
+    return False
 
 
 def cap_offset(cfg, preset):
@@ -102,7 +180,7 @@ def build(layout, cfg, preset):
         J1(+5V, DIN, GND) -> D1 -> D2 -> ... -> DN -> J2(+5V, DOUT, GND)
     Simple LEDs are wired as a matrix: anode -> ROW<r>, cathode -> COL<c>.
     """
-    d = Design(preset)
+    d = Design(preset, cfg["side"])
     origin = (float(cfg["origin_x"]), float(cfg["origin_y"]))
     prefix = cfg["ref_prefix"] or "D"
     pins = preset["pins"]
@@ -156,9 +234,19 @@ def build(layout, cfg, preset):
             for jn, (value, net, led, keys) in enumerate(specs, 1):
                 cpins = parse_pinout(cfg.get("conn_pinout"), net)
                 xy = (float(cfg[keys[0]]), float(cfg[keys[1]])) if manual else beside(led, len(cpins))
-                d.components.append(Component("J%d" % jn, "conn", value,
-                                              conn_footprint(cfg, len(cpins)), cpins, xy,
-                                              c_rot, c_side))
+                comp = Component("J%d" % jn, "conn", value, conn_footprint(cfg, len(cpins)),
+                                 cpins, xy, c_rot, c_side)
+                if not manual and c_side == cfg["side"]:
+                    # the spot beside the LED may be taken by parts of other rows:
+                    # move outward (away from the LED) in 1.27 mm steps until it is free
+                    step = 1.27 if xy[0] >= led.xy[0] else -1.27
+                    other = -step
+                    tries = [(xy[0] + step * k, xy[1]) for k in range(0, 80)]
+                    tries += [(led.xy[0] + (led.xy[0] - xy[0]) + other * k, xy[1])
+                              for k in range(0, 80)]
+                    if not _free_spot(comp, d.components, preset, tries):
+                        comp.xy = xy
+                d.components.append(comp)
         return d
 
     # simple LEDs: row / column matrix, numbered in layout.order

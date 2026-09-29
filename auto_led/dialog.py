@@ -111,20 +111,7 @@ SHAPE_GRAY = 70
 BACKGROUND = wx.Colour(245, 245, 245)
 
 
-def footprint_body(lib_id, default=(1.0, 0.5)):
-    """Approximate body size (w, h) in mm from a KiCad footprint name.
-
-    C_0402_1005Metric -> 1.0 x 0.5, PinHeader_1x03_P2.54mm -> 2.54 x 7.62.
-    """
-    import re
-    m = re.search(r"(\d\d)(\d\d)Metric", lib_id)
-    if m:
-        return int(m.group(1)) / 10.0, int(m.group(2)) / 10.0
-    m = re.search(r"_1x(\d+)_P([\d.]+)mm", lib_id)
-    if m:
-        pitch = float(m.group(2))
-        return pitch, pitch * int(m.group(1))
-    return default
+from .design import footprint_body, component_box, find_overlaps  # noqa: E402
 
 
 def _rot(dx, dy, deg):
@@ -285,6 +272,15 @@ def render_preview(mask, layout, cfg, width, height, view=None, design=None):
     dc.SetPen(wx.Pen(wx.Colour(0, 160, 0), 3))
     dc.SetBrush(wx.TRANSPARENT_BRUSH)
     dc.DrawCircle(chain[0].x, chain[0].y, max(6, int(max(bw, bh) * d)))
+    if design is not None and getattr(design, "overlaps", None):
+        # colliding parts (approximate courtyards) outlined in magenta
+        dc.SetPen(wx.Pen(wx.Colour(255, 0, 255), 2))
+        dc.SetBrush(wx.TRANSPARENT_BRUSH)
+        for comp in {c for pair in design.overlaps for c in pair}:
+            x0, y0, x1, y1 = component_box(comp, design.preset)
+            sx0, sy0 = to_screen(x0 + bx, y0 + by)
+            sx1, sy1 = to_screen(x1 + bx, y1 + by)
+            dc.DrawRectangle(int(sx0), int(sy0), max(2, int(sx1 - sx0)), max(2, int(sy1 - sy0)))
     dc.SelectObject(wx.NullBitmap)
     return bmp
 
@@ -556,13 +552,22 @@ class AutoLedDialog(wx.Dialog):
         design = None
         if layout.count and layout.count <= 20000:
             from . import design as design_mod
-            design = design_mod.build(layout, cfg, config.preset_for(cfg))
+            try:
+                design = design_mod.build(layout, cfg, config.preset_for(cfg))
+                design.overlaps = find_overlaps(design.components, design.preset, design.side)
+            except ValueError as e:
+                self.status.SetLabel("Error: %s" % e)
+                design = None
         self.preview.set_data(mask, layout, cfg, design)
         sx, sy = layout.mm_per_px
         shape = "image %.1f x %.1f mm" % (mask.width * sx, mask.height * sy)
         if layout.count:
-            self.status.SetLabel("Grid %d x %d, %d LEDs | %s | green = LED 1, blue = chain" % (
-                layout.rows, layout.cols, layout.count, shape))
+            warn = ""
+            if design is not None and design.overlaps:
+                warn = " | \u26a0 %d overlapping parts (magenta): increase pitch or move caps" % len(
+                    design.overlaps)
+            self.status.SetLabel("Grid %d x %d, %d LEDs | %s | green = LED 1, blue = chain%s" % (
+                layout.rows, layout.cols, layout.count, shape, warn))
         else:
             self.status.SetLabel("No LEDs fit - adjust threshold / invert / width / border offset")
 

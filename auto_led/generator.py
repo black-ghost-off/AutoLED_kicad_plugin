@@ -74,6 +74,10 @@ def generate(cfg, board=None, board_path="", pipeline=None, log=print, keep_goin
     preset = config.preset_for(cfg)
     design = design_mod.build(layout, cfg, preset)
     log("Grid %d x %d, %d LEDs" % (layout.rows, layout.cols, layout.count))
+    overlaps = design_mod.find_overlaps(design.components, preset, design.side)
+    if overlaps:
+        log("WARNING: %d pairs of parts overlap (e.g. %s / %s). Increase the LED pitch or change "
+            "the cap position / rotation." % (len(overlaps), overlaps[0][0].ref, overlaps[0][1].ref))
 
     out_dir = cfg["out_dir"] or (os.path.dirname(board_path) if board_path else os.getcwd())
     base = cfg["base_name"] or "leds"

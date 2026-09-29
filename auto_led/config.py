@@ -21,7 +21,7 @@ PRESETS = {
         "footprint": "LED_SMD:LED_WS2812B-2020_PLCC4_2.0x2.0mm",
         "pins": {"DOUT": "1", "GND": "2", "DIN": "3", "VDD": "4"},
         "body": (2.0, 2.0),
-        "cap_offset": (0.0, 2.0),
+        "cap_offset": (0.0, 2.4),  # LED courtyard 1.30 + 0402 courtyard 0.96 + margin
     },
     "SK6812MINI (3535)": {
         "kind": "addressable",
@@ -29,7 +29,7 @@ PRESETS = {
         "footprint": "LED_SMD:LED_SK6812MINI_PLCC4_3.5x3.5mm_P1.75mm",
         "pins": {"DOUT": "1", "GND": "2", "DIN": "3", "VDD": "4"},
         "body": (3.5, 3.5),
-        "cap_offset": (0.0, 3.0),
+        "cap_offset": (0.0, 3.2),  # LED courtyard 2.05 + 0402 courtyard 0.96 + margin
     },
     "LED 0805": {
         "kind": "simple",

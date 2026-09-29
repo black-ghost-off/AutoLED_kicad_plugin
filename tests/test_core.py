@@ -269,6 +269,26 @@ class ConnectorTest(unittest.TestCase):
         self.assertAlmostEqual(auto.xy[0], 100 - (2.5 + 10 + 1.27))   # left of the first LED
         self.assertAlmostEqual(auto.xy[1], 100 - 2.54)                 # 3 pins centred on it
 
+    def test_overlap_detection(self):
+        c = cfg(sample_mode="pixel", pitch_x=7, pitch_y=7)       # 5050 + caps, 2 rows
+        m = Mask(2, 2, bytes([1, 1, 1, 1]))
+        d = design.build(grid.place(m, c), c, config.preset_for(c))
+        hits = design.find_overlaps(d.components, d.preset, d.side)
+        self.assertTrue(any({a.kind, b.kind} == {"cap", "led"} for a, b in hits))
+        c = cfg(sample_mode="pixel", pitch_x=10, pitch_y=10)
+        d = design.build(grid.place(m, c), c, config.preset_for(c))
+        self.assertEqual(design.find_overlaps(d.components, d.preset, d.side), [])
+
+    def test_auto_connector_avoids_other_rows(self):
+        # last LED ends a short row; the next row is longer, so the spot right beside
+        # the last LED is occupied by the other row's LED / cap
+        m = Mask(3, 2, bytes([1, 1, 1,
+                              1, 0, 0]))
+        c = cfg(sample_mode="pixel", pitch_x=7, pitch_y=10, zigzag=False, start_corner="bottom-left",
+                order="rows")
+        d = design.build(grid.place(m, c), c, config.preset_for(c))
+        self.assertEqual(design.find_overlaps(d.components, d.preset, d.side), [])
+
     def test_matrix_split(self):
         c = cfg(sample_mode="pixel", preset="LED 0805", pitch_x=5, pitch_y=5, conn_max_pins=2)
         m = Mask(5, 1, bytes([1] * 5))
