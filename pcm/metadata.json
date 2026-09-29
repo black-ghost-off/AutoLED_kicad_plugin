@@ -1,20 +1,29 @@
 {
+  "$schema": "https://go.kicad.org/pcm/schemas/v1",
   "name": "AutoLED",
-  "description": "Place WS2812 / SMD LEDs as a 2D grid inside a shape from an SVG, PNG or BMP image.",
-  "description_full": "Fills a shape taken from an SVG, PNG, BMP or JPG image (converted to black & white with a configurable threshold) with a 2D grid of LEDs such as WS2812B, SK6812MINI, 0805, 0603 or 1206.\nSettings: scale, LED pitch, border offset, grid shift, placement mode, rotation, board side, direction, zigzag and start corner.\nOutputs: JSON, TXT and a C/C++ header with the LED map and index; a schematic (daisy chain or row/column matrix); footprints placed on the PCB with nets; an optional board outline following the shape; and optional autorouting with Freerouting.",
-  "identifier": "com.github.autoled.kicad",
+  "description": "Place WS2812 / SMD LEDs as a 2D grid inside a shape from an SVG, PNG or BMP image, with schematic, PCB and LED map export.",
+  "description_full": "AutoLED fills a shape taken from an SVG, PNG, BMP or JPG image with a 2D grid of LEDs such as WS2812B, WS2812B-2020, SK6812MINI, 0805, 0603 or 1206.\n\nThe image is converted to black and white with a configurable threshold, scaled by width, height, percent or DPI, and LEDs are placed with a configurable pitch, border offset and grid shift, optionally keeping the whole LED body inside the shape. A live preview (zoom and pan) shows LEDs, decoupling capacitors, connectors and the data chain.\n\nOutputs:\n- the LED map as JSON, TXT and a C/C++ header (mask, chain index, row/column tables)\n- a schematic: WS2812 daisy chain with decoupling caps and in/out connectors, or a row/column matrix for simple LEDs\n- footprints placed on the PCB with nets, in a group that can be regenerated\n- an optional board outline or cut line that follows the image shape (also exported as SVG and DXF)\n- optional autorouting with Freerouting (requires Java and the Freerouting jar, e.g. from the Freerouting plugin)\n\nChain order: rows or columns, zigzag, start corner, optional 180 degree rotation of LEDs on backward lines. Capacitor rotation / position and connector footprint, pin order, placement and side are configurable.",
+  "identifier": "com.github.black-ghost-off.autoled",
   "type": "plugin",
   "author": {
-    "name": "AutoLED contributors",
-    "contact": {}
+    "name": "black-ghost-off",
+    "contact": {
+      "github": "https://github.com/black-ghost-off"
+    }
   },
   "license": "MIT",
-  "resources": {},
+  "resources": {
+    "Github": "https://github.com/black-ghost-off/AutoLED_kicad_plugin",
+    "Issues": "https://github.com/black-ghost-off/AutoLED_kicad_plugin/issues"
+  },
+  "tags": ["led", "ws2812", "placement", "image", "schematic"],
   "versions": [
     {
       "version": "1.0.3",
       "status": "stable",
-      "kicad_version": "7.0"
+      "kicad_version": "7.0",
+      "kicad_version_max": "10.99",
+      "runtime": "swig"
     }
   ]
 }

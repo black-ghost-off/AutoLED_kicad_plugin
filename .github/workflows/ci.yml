@@ -47,14 +47,15 @@ jobs:
           else
             python tools/build_pcm.py
           fi
-      - name: Validate metadata against KiCad PCM schema
-        run: python tools/validate_pcm.py "${{ steps.build.outputs.zip }}"
+      - name: Validate package and submission metadata (KiCad PCM schema + add-on rules)
+        run: python tools/validate_pcm.py "${{ steps.build.outputs.zip }}" --submit dist/metadata-submit.json
       - uses: actions/upload-artifact@v4
         with:
           name: AutoLED-pcm-package
           path: |
             dist/*.zip
             dist/*.sha256
+            dist/metadata-submit.json
           if-no-files-found: error
 
   release:
@@ -73,6 +74,10 @@ jobs:
           files: |
             dist/*.zip
             dist/*.sha256
+            dist/metadata-submit.json
           generate_release_notes: true
           body: |
             Install: KiCad → **Plugin and Content Manager → Install from File…** → pick `AutoLED-*.zip`.
+
+            `metadata-submit.json` is the version entry for the KiCad add-on repository
+            (see PUBLISHING.md).

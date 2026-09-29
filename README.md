@@ -81,17 +81,25 @@ static const int8_t led_index[LED_ROWS][LED_COLS] = {
 
 ## Install
 
-**Plugin and Content Manager (recommended):**
+**From a GitHub release (recommended):** download `AutoLED-<version>.zip` from
+[Releases](https://github.com/black-ghost-off/AutoLED_kicad_plugin/releases). In KiCad, open
+**Plugin and Content Manager → Install from File…**, pick the zip, then **restart KiCad**.
+After installing an update, quit KiCad fully; "Refresh Plugins" doesn't reload a plugin that is
+already loaded. The toolbar button is a red LED grid.
+
+Once the package is accepted into the official KiCad repository, it will also be listed directly
+in the Plugin and Content Manager (see [PUBLISHING.md](PUBLISHING.md)).
+
+**Build the package yourself:**
 
 ```sh
-python3 tools/build_pcm.py      # -> dist/AutoLED-1.0.0.zip
+python3 tools/build_pcm.py      # -> dist/AutoLED-<version>.zip
 ```
 
-In KiCad, open **Plugin and Content Manager → Install from File…** and pick `dist/AutoLED-1.0.0.zip`.
-Don't zip the `auto_led` folder yourself: the Plugin and Content Manager needs the
+Don't zip the `auto_led` folder by hand: the Plugin and Content Manager needs the
 `metadata.json` / `plugins/` / `resources/` layout that the script builds.
 
-**Development (symlink, edits take effect after Refresh Plugins):**
+**Development (symlink):**
 
 ```sh
 ./install.sh            # symlinks auto_led/ into ~/Documents/KiCad/<newest>/scripting/plugins
@@ -99,7 +107,8 @@ Don't zip the `auto_led` folder yourself: the Plugin and Content Manager needs t
 ```
 
 On Windows, copy the `auto_led` folder to `%USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\`.
-Then in the PCB Editor, choose **Tools → External Plugins → Refresh Plugins**. A toolbar button (a red LED grid) appears.
+Restart KiCad after code changes. Don't keep both the symlinked copy and a Plugin and Content
+Manager install: both register a toolbar button.
 
 ## How it works
 
@@ -235,11 +244,17 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
   version) and 3.12. Then it builds the package, validates `metadata.json` against KiCad's PCM
   schema, and uploads `AutoLED-<version>.zip` plus a `.sha256` file as a workflow artifact.
 - **Tag `v*`** (for example `git tag v1.1.0 && git push origin v1.1.0`): builds the package with the
-  version taken from the tag and publishes it as a GitHub Release with auto-generated notes.
+  version taken from the tag and publishes it as a GitHub Release with auto-generated notes. The
+  release also includes `metadata-submit.json` for the KiCad add-on repository
+  ([PUBLISHING.md](PUBLISHING.md)).
 
 Locally:
 
 ```sh
 python3 tools/build_pcm.py --version 1.1.0       # dist/AutoLED-1.1.0.zip + .sha256
-pip install jsonschema && python3 tools/validate_pcm.py dist/AutoLED-1.1.0.zip
+pip install jsonschema && python3 tools/validate_pcm.py dist/AutoLED-1.1.0.zip --submit dist/metadata-submit.json
 ```
+
+## License
+
+[MIT](LICENSE)
