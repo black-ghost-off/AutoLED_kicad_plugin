@@ -1,0 +1,20 @@
+{
+  "name": "AutoLED",
+  "description": "Place WS2812 / SMD LEDs as a 2D grid inside a shape from an SVG, PNG or BMP image.",
+  "description_full": "Fills a shape taken from an SVG, PNG, BMP or JPG image (converted to black & white with a configurable threshold) with a 2D grid of LEDs such as WS2812B, SK6812MINI, 0805, 0603 or 1206.\nSettings: scale, LED pitch, border offset, grid shift, placement mode, rotation, board side, direction, zigzag and start corner.\nOutputs: JSON, TXT and a C/C++ header with the LED map and index; a schematic (daisy chain or row/column matrix); footprints placed on the PCB with nets; an optional board outline following the shape; and optional autorouting with Freerouting.",
+  "identifier": "com.github.autoled.kicad",
+  "type": "plugin",
+  "author": {
+    "name": "AutoLED contributors",
+    "contact": {}
+  },
+  "license": "MIT",
+  "resources": {},
+  "versions": [
+    {
+      "version": "1.0.0",
+      "status": "stable",
+      "kicad_version": "7.0"
+    }
+  ]
+}
