@@ -74,6 +74,11 @@ START_CORNERS = [
 
 SIDES = [("front", "Front (F.Cu)"), ("back", "Back (B.Cu)")]
 
+SCH_TARGETS = [
+    ("project", "Project schematic (if empty / AutoLED)"),
+    ("separate", "Separate file <base>.kicad_sch"),
+]
+
 CONN_PLACEMENTS = [("auto", "Auto: beside first / last LED"), ("manual", "Manual X / Y")]
 
 CONN_SIDES = [("same", "Same side as LEDs"), ("opposite", "Opposite side")]
@@ -164,6 +169,7 @@ DEFAULTS = {
     "export_txt": True,
     "export_h": True,
     "gen_sch": True,
+    "sch_target": "project",      # write into <project>.kicad_sch when it is empty or ours
     "place_pcb": True,
     "clear_prev": True,
     "outline": "none",

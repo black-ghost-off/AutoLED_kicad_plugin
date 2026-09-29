@@ -80,6 +80,7 @@ FORM = [
         ("export_txt", "Export TXT", "bool", {}),
         ("export_h", "Export C/C++ header", "bool", {}),
         ("gen_sch", "Generate schematic", "bool", {}),
+        ("sch_target", "Schematic goes to", "choice", {"choices": config.SCH_TARGETS}),
         ("export_cut", "Export cut line (SVG + DXF)", "bool", {}),
     ]),
     ("PCB", [
@@ -523,6 +524,7 @@ class AutoLedDialog(wx.Dialog):
             self.controls[key][0].Enable(caps)
         for key in ("cap_dx", "cap_dy"):
             self.controls[key][0].Enable(caps and cfg["cap_custom_offset"])
+        self.controls["sch_target"][0].Enable(cfg["gen_sch"])
         conn = cfg["connectors"]
         manual = cfg["conn_placement"] == "manual"
         matrix = config.preset_for(cfg)["kind"] != "addressable"

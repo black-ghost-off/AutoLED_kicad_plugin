@@ -95,13 +95,30 @@ def generate(cfg, board=None, board_path="", pipeline=None, log=print, keep_goin
         write(".h", exporters.to_header(layout, cfg, design))
     if cfg["gen_sch"]:
         from . import schematic
-        path = os.path.join(out_dir, base + ".kicad_sch")
+        project = os.path.splitext(os.path.basename(board_path))[0] if board_path else base
+        separate = os.path.join(out_dir, base + ".kicad_sch")
+        path, root_uuid = separate, None
+        if cfg["sch_target"] == "project" and board_path:
+            project_sch = os.path.splitext(board_path)[0] + ".kicad_sch"
+            state, existing_uuid = schematic.inspect_existing(project_sch)
+            if state in ("missing", "empty", "autoled"):
+                path, root_uuid = project_sch, existing_uuid
+            else:
+                log("NOTE: %s already has your own content, so it was not changed. The LED "
+                    "schematic was written to %s. Add it in the Schematic Editor with Place -> "
+                    "Hierarchical Sheet, then Update PCB from Schematic (re-link footprints by "
+                    "reference)." % (os.path.basename(project_sch), separate))
         if os.path.exists(path):
             os.replace(path, path + ".bak")
-        project = os.path.splitext(os.path.basename(board_path))[0] if board_path else base
-        _, symbols = schematic.write(path, design, project, title="%s LED array" % preset["value"])
+        _, symbols = schematic.write(path, design, project, title="%s LED array" % preset["value"],
+                                     root_uuid=root_uuid)
         written.append(path)
         log("Wrote " + path)
+        lock = os.path.join(os.path.dirname(path), "~" + os.path.basename(path) + ".lck")
+        if os.path.exists(lock):
+            log("WARNING: %s is open in the Schematic Editor. Close it WITHOUT saving and open it "
+                "again to see the LEDs (saving the open copy would overwrite them)."
+                % os.path.basename(path))
         lib_path = os.path.join(out_dir, schematic.LIB + ".kicad_sym")
         schematic.write_library(lib_path, symbols)
         written.append(lib_path)

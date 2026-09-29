@@ -277,6 +277,50 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual([len(x.pins) for x in cols], [2, 2, 1])
 
 
+class SchematicTargetTest(unittest.TestCase):
+    EMPTY_V10 = ('(kicad_sch\n\t(version 20260306)\n\t(generator "eeschema")\n\t(generator_version "10.0")\n'
+                 '\t(uuid "a37ab034-bd9c-4225-8916-e7d1b077f857")\n\t(paper "A4")\n\t(lib_symbols)\n'
+                 '\t(sheet_instances\n\t\t(path "/"\n\t\t\t(page "1")\n\t\t)\n\t)\n\t(embedded_fonts no)\n)\n')
+
+    def test_inspect_existing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "x.kicad_sch")
+            self.assertEqual(schematic.inspect_existing(p), ("missing", None))
+            open(p, "w").write(self.EMPTY_V10)
+            self.assertEqual(schematic.inspect_existing(p),
+                             ("empty", "a37ab034-bd9c-4225-8916-e7d1b077f857"))
+            open(p, "w").write(self.EMPTY_V10.replace("(lib_symbols)",
+                               '(lib_symbols (symbol "x" (rectangle)))\n(symbol (lib_id "Device:R"))'))
+            self.assertEqual(schematic.inspect_existing(p)[0], "user")
+
+    def test_generate_into_empty_project_schematic(self):
+        from auto_led import generator
+        with tempfile.TemporaryDirectory() as tmp:
+            board = os.path.join(tmp, "proj.kicad_pcb")
+            sch = os.path.join(tmp, "proj.kicad_sch")
+            open(sch, "w").write(self.EMPTY_V10)
+            c = cfg(image_path="unused", sample_mode="pixel", pitch_x=10, pitch_y=10,
+                    export_json=False, export_txt=False, export_h=False, place_pcb=False)
+
+            class P(generator.Pipeline):
+                def layout(self, _cfg):
+                    m = Mask(2, 1, bytes([1, 1]))
+                    return m, grid.place(m, _cfg)
+            generator.generate(c, board_path=board, pipeline=P(), log=lambda m: None)
+            text = open(sch).read()
+            self.assertIn("a37ab034-bd9c-4225-8916-e7d1b077f857", text)   # root UUID kept
+            self.assertIn('(reference "D2")', text)
+            self.assertTrue(os.path.exists(sch + ".bak"))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "leds.kicad_sch")))
+            # regenerating: the file is now ours, so it is replaced again
+            self.assertEqual(schematic.inspect_existing(sch)[0], "autoled")
+            # a schematic with the user's own content is never touched
+            open(sch, "w").write(self.EMPTY_V10.replace("(lib_symbols)", '(lib_symbols)\n(wire)'))
+            generator.generate(c, board_path=board, pipeline=P(), log=lambda m: None)
+            self.assertIn("(wire)", open(sch).read())
+            self.assertTrue(os.path.exists(os.path.join(tmp, "leds.kicad_sch")))
+
+
 class OutlineTest(unittest.TestCase):
     def test_shape_outline_encloses_leds(self):
         c = cfg(width_mm=100, pitch_x=10, pitch_y=10, border_mm=2, outline_margin=2)
